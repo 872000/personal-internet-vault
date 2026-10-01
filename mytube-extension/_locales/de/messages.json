@@ -1,0 +1,41 @@
+{
+  "extensionName": { "message": "MyTube Sync" },
+  "extensionDescription": { "message": "Selbst gehostete Synchronisation für Abonnements, Wiedergabelisten und Wiedergabeverlauf auf YouTube." },
+
+  "tabSubscriptions": { "message": "Abonnements" },
+  "tabPlaylists": { "message": "Wiedergabelisten" },
+  "tabHistory": { "message": "Verlauf" },
+
+  "notConnected": { "message": "Nicht verbunden" },
+  "notConnectedMsg": { "message": "Nicht verbunden. Bitte im Erweiterungs-Popup einrichten." },
+  "loading": { "message": "Wird geladen…" },
+  "loadMore": { "message": "250 weitere laden…" },
+  "reloadTitle": { "message": "Abonnements, Wiedergabelisten & Verlauf neu laden" },
+
+  "noSubscriptions": { "message": "Noch keine Abonnements." },
+  "noRecentUploads": { "message": "Keine aktuellen Videos gefunden." },
+  "someChannelsFailed": { "message": "$COUNT$ Kanal/Kanäle konnten gerade nicht abgerufen werden (Netzwerkproblem) - wird automatisch erneut versucht.", "placeholders": { "count": { "content": "$1" } } },
+  "noPlaylists": { "message": "Noch keine Wiedergabelisten." },
+  "noHistory": { "message": "Noch kein Wiedergabeverlauf." },
+  "emptyPlaylist": { "message": "Leer." },
+
+  "btnLike": { "message": "Gefällt mir" },
+  "btnLiked": { "message": "Gefällt mir" },
+  "btnWatchLater": { "message": "Später ansehen" },
+  "btnInWatchLater": { "message": "In \u201eSp\u00e4ter ansehen\u201c" },
+  "btnSubscribe": { "message": "Abonnieren" },
+  "btnSubscribed": { "message": "Abonniert" },
+  "btnAddToPlaylist": { "message": "Zur Wiedergabeliste..." },
+  "btnNewPlaylist": { "message": "Erstellen" },
+  "newPlaylistPlaceholder": { "message": "Name der neuen Wiedergabeliste" },
+  "btnDeletePlaylist": { "message": "Wiedergabeliste löschen" },
+  "confirmDeletePlaylist": { "message": "Wiedergabeliste \u201e$NAME$\u201c l\u00f6schen?", "placeholders": { "name": { "content": "$1" } } },
+
+  "watched": { "message": "Gesehen" },
+  "resumeAt": { "message": "$TIME$", "placeholders": { "time": { "content": "$1" } } },
+
+  "cantSubscribeNoHandle": { "message": "Kein @Handle für diesen Kanal gefunden – Abonnieren nicht möglich." },
+
+  "playlistLiked": { "message": "Gefällt mir" },
+  "playlistWatchLater": { "message": "Später ansehen" }
+}

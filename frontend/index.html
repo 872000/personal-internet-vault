@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MyTube Sync</title>
+<style>
+:root {
+  --bg:      #14171c;
+  --panel:   #1c2128;
+  --surface: #232830;
+  --hover:   #2c333e;
+  --border:  #2a2f38;
+  --text:    #e8eaed;
+  --muted:   #8b94a3;
+  --accent:  #f0a868;
+  --acc-h:   #e0954f;
+  --teal:    #5ec8c0;
+  --success: #3ddc97;
+  --danger:  #e0654f;
+  --r:       8px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Top bar ── */
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#topbar h1 { font-size: 14px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+#inp-token {
+  flex: 1; min-width: 0;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--r);
+  padding: 5px 10px; font-size: 12px;
+}
+#inp-token:focus { outline: 1px solid var(--accent); }
+#btn-connect {
+  background: var(--accent); color: #3a2410;
+  border: none; border-radius: var(--r);
+  padding: 5px 14px; font-size: 12px; font-weight: 700; cursor: pointer;
+  white-space: nowrap;
+}
+#btn-connect:hover { background: var(--acc-h); }
+#conn-status { font-size: 11px; color: var(--muted); white-space: nowrap; }
+#conn-status.ok  { color: var(--success); }
+#conn-status.err { color: var(--danger); }
+
+/* ── Search bar ── */
+#searchbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#searchbar label { font-size: 11px; color: var(--muted); white-space: nowrap; }
+#inp-search {
+  flex: 1; min-width: 0;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--r);
+  padding: 5px 10px; font-size: 12px;
+}
+#inp-search:focus { outline: 1px solid var(--teal); }
+#search-actions { display: flex; gap: 6px; flex-wrap: nowrap; }
+
+/* ── Three columns ── */
+#cols {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  min-height: 0; /* critical: allows children to shrink */
+  overflow: hidden;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  min-height: 0;
+  overflow: hidden;
+}
+.col:last-child { border-right: none; }
+
+.col-head {
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.col-head h2 { font-size: 12px; font-weight: 700; flex: 1; }
+.col-head .col-meta { font-size: 11px; color: var(--muted); }
+
+/* ── Playlist create row ── */
+#pl-create {
+  display: flex; gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#pl-create input {
+  flex: 1; min-width: 0;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 8px; font-size: 12px;
+}
+#pl-create input:focus { outline: 1px solid var(--accent); }
+
+/* ── Scrollable column body ── */
+.col-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  min-height: 0;
+}
+.col-body::-webkit-scrollbar { width: 4px; }
+.col-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── Shared item styles ── */
+.empty { color: var(--muted); font-size: 12px; padding: 6px 2px; }
+
+.pl-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 6px; border-radius: 6px; cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.pl-row:last-child { border-bottom: none; }
+.pl-row:hover { background: var(--hover); }
+.pl-row.selected { background: var(--surface); }
+.pl-name { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-count { font-size: 11px; color: var(--muted); }
+
+/* separator between playlist list and playlist contents */
+.pl-divider {
+  margin: 8px 0 4px;
+  border: none;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.pl-section-label {
+  font-size: 10px; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em;
+  padding: 2px 2px 6px;
+}
+
+.media-card {
+  display: flex; gap: 9px;
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 7px; margin-bottom: 6px;
+}
+.media-card:last-child { margin-bottom: 0; }
+.thumb-wrap { position: relative; flex-shrink: 0; }
+.media-card img {
+  width: 88px; height: 49px; object-fit: cover;
+  border-radius: 4px; background: #000; display: block;
+}
+.thumb-action {
+  position: absolute; top: 3px; right: 3px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 4px; border: none; border-radius: 5px;
+  background: rgba(0, 0, 0, .6); color: #fff; cursor: pointer; line-height: 0;
+}
+.thumb-action:hover { background: var(--danger); }
+.thumb-prog {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 3px; background: rgba(0, 0, 0, .4); border-radius: 0 0 4px 4px; overflow: hidden;
+}
+.thumb-prog-fill { height: 100%; }
+.thumb-prog-fill.prog-done { background: var(--success); }
+.thumb-prog-fill.prog-part { background: var(--accent); }
+.media-info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; }
+.media-title {
+  font-size: 12px; font-weight: 600; color: var(--text);
+  text-decoration: none; line-height: 1.3;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.media-title:hover { color: var(--accent); }
+.media-meta {
+  font-size: 11px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.meta-watched { color: var(--success); }
+
+.ch-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 2px; border-bottom: 1px solid var(--border); margin-bottom: 4px;
+}
+.ch-name { flex: 1; font-size: 12px; font-weight: 700; color: var(--teal); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ch-block { margin-bottom: 12px; }
+.ch-block:last-child { margin-bottom: 0; }
+
+/* ── Buttons ── */
+.btn {
+  border: none; border-radius: 5px;
+  padding: 3px 8px; font-size: 11px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; line-height: 1.5;
+}
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn-primary { background: var(--accent);  color: #3a2410; }
+.btn-primary:hover  { background: var(--acc-h); }
+.btn-danger  { background: var(--danger);  color: #fff; }
+.btn-danger:hover   { background: #c8553f; }
+.btn-teal    { background: var(--teal);    color: #0a1f1e; }
+.btn-teal:hover     { background: #4db8b0; }
+.btn-ghost   { background: var(--surface); color: var(--muted); }
+.btn-ghost:hover    { background: var(--hover); color: var(--text); }
+
+/* ── Log bar ── */
+#logbar {
+  border-top: 1px solid var(--border); background: var(--panel);
+  padding: 4px 14px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 10px;
+  height: 26px; overflow: hidden;
+}
+#log-text { font-size: 11px; color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#log-text.err { color: var(--danger); }
+#log-text.ok  { color: var(--success); }
+#refresh-btn { font-size: 11px; color: var(--muted); background: none; border: none; cursor: pointer; padding: 0; }
+#refresh-btn:hover { color: var(--text); }
+#refresh-countdown { font-size: 11px; color: var(--muted); white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <h1><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px"><rect x="3" y="3" width="18" height="18" rx="4"/><polygon points="10,8 16,12 10,16" fill="currentColor" stroke="none"/></svg> MyTube Sync</h1>
+  <input id="inp-token" type="password" placeholder="API token — press Enter to connect">
+  <button id="btn-connect">Connect</button>
+  <span id="conn-status">Not connected</span>
+</div>
+
+<div id="searchbar">
+  <label>Video URL or @channel:</label>
+  <input id="inp-search" type="text" placeholder="https://youtube.com/watch?v=… or @ChannelHandle">
+  <div id="search-actions"></div>
+</div>
+
+<div id="cols">
+  <!-- Playlists -->
+  <div class="col">
+    <div class="col-head">
+      <h2>Playlists</h2>
+      <span class="col-meta" id="pl-meta"></span>
+    </div>
+    <div id="pl-create">
+      <input id="inp-pl-name" type="text" placeholder="New playlist name">
+      <button class="btn btn-primary" id="btn-pl-create">Create</button>
+    </div>
+    <div class="col-body" id="pl-body">
+      <p class="empty">Connect to load.</p>
+    </div>
+  </div>
+
+  <!-- History -->
+  <div class="col">
+    <div class="col-head">
+      <h2>Watch History</h2>
+      <span class="col-meta" id="hist-meta"></span>
+    </div>
+    <div class="col-body" id="hist-body">
+      <p class="empty">Connect to load.</p>
+    </div>
+  </div>
+
+  <!-- Subscriptions -->
+  <div class="col">
+    <div class="col-head">
+      <h2>Subscriptions</h2>
+      <span class="col-meta" id="subs-meta"></span>
+    </div>
+    <div class="col-body" id="subs-body">
+      <p class="empty">Connect to load.</p>
+    </div>
+  </div>
+</div>
+
+<div id="logbar">
+  <span id="log-text">—</span>
+  <button id="refresh-btn" title="Refresh now"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4 12a8 8 0 0 1 14.5-4.7M20 12a8 8 0 0 1-14.5 4.7"/><polyline points="18.5,3 18.5,7.3 14.2,7.3"/><polyline points="5.5,21 5.5,16.7 9.8,16.7"/></svg> Refresh</button>
+  <span id="refresh-countdown"></span>
+</div>
+
+<script>
+"use strict";
+
+// ── Config ──────────────────────────────────────────────────────
+const REFRESH_S  = 60;
+const SYS_LIKED  = "Liked Videos";
+const SYS_LATER  = "Watch Later";
+
+// ── State ───────────────────────────────────────────────────────
+const S = {
+  playlists:        [],
+  plContents:       {},   // id → [items]
+  history:          [],
+  historyOffset:    0,
+  historyExhausted: false,
+  subs:             [],
+  feed:             [],
+  activePl:         null,
+  connected:        false,
+};
+const metaCache = {};
+
+// ── Persistence ─────────────────────────────────────────────────
+function loadToken() {
+  document.getElementById("inp-token").value = localStorage.getItem("mts_token") || "";
+}
+function saveToken() {
+  const t = document.getElementById("inp-token").value.trim();
+  if (t) localStorage.setItem("mts_token", t);
+}
+
+// ── API ─────────────────────────────────────────────────────────
+function token() { return document.getElementById("inp-token").value.trim(); }
+
+// Derive the API base from the page URL — works at any subpath, with or without trailing slash
+const API_BASE = window.location.pathname.replace(/\/+$/, "");
+
+async function api(path, method = "GET", body = null) {
+  const opts = { method, headers: { "Authorization": `Bearer ${token()}`, "Content-Type": "application/json" } };
+  if (body !== null) opts.body = JSON.stringify(body);
+  const r = await fetch(API_BASE + path, opts);
+  if (!r.ok) throw new Error(`${method} ${path} → HTTP ${r.status}`);
+  return r.json();
+}
+
+// ── Logging ─────────────────────────────────────────────────────
+function log(msg, cls = "") {
+  const el = document.getElementById("log-text");
+  el.textContent = msg;
+  el.className = cls;
+}
+
+// ── oEmbed metadata — parallel, cached ──────────────────────────
+const metaInflight = {};
+
+async function getMeta(videoId) {
+  if (metaCache[videoId]) return metaCache[videoId];
+  if (metaInflight[videoId]) return metaInflight[videoId];
+  metaInflight[videoId] = fetch(
+    `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
+  ).then(r => r.ok ? r.json() : null).then(d => {
+    const handle = d?.author_url?.split("/").pop()?.startsWith("@")
+      ? d.author_url.split("/").pop() : null;
+    const m = {
+      title: d?.title || `Video ${videoId}`,
+      author: d?.author_name || "",
+      handle,
+      thumb: d?.thumbnail_url || `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`,
+    };
+    metaCache[videoId] = m;
+    delete metaInflight[videoId];
+    return m;
+  }).catch(() => {
+    const m = { title: `Video ${videoId}`, author: "", handle: null, thumb: `https://img.youtube.com/vi/${videoId}/mqdefault.jpg` };
+    metaCache[videoId] = m;
+    delete metaInflight[videoId];
+    return m;
+  });
+  return metaInflight[videoId];
+}
+
+// Prefetch a list of IDs in parallel, up to `concurrency` at once
+async function prefetchMeta(ids, concurrency = 25) {
+  const queue = ids.filter(id => !metaCache[id]);
+  for (let i = 0; i < queue.length; i += concurrency) {
+    await Promise.all(queue.slice(i, i + concurrency).map(getMeta));
+  }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────
+function esc(s) {
+  return (s || "").replace(/[&<>"']/g, c =>
+    ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" })[c]);
+}
+
+// Small self-contained inline SVG icon set - matches the browser
+// extension's icon style (currentColor stroke/fill so each icon inherits
+// its surrounding element's color) rather than emoji.
+const ICONS = {
+  star: `<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" stroke="none" style="vertical-align:-2px"><polygon points="12,2 15,9 22,9.3 16.5,14 18.5,21 12,17 5.5,21 7.5,14 2,9.3 9,9"/></svg>`,
+  hourglass: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M6 2h12M6 22h12M6 2c0 5 4 7 6 8-2 1-6 3-6 8M18 2c0 5-4 7-6 8 2 1 6 3 6 8"/></svg>`,
+  folder: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/></svg>`,
+  heart: `<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" stroke="none" style="vertical-align:-2px"><path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 6c-2.5 4.5-9.5 9-9.5 9z"/></svg>`,
+  check: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><polyline points="4,12 9,17 20,6"/></svg>`,
+  trash: `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4,7 20,7"/><path d="M6 7V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v2M8 7v12a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V7"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>`,
+};
+
+function watchLink(videoId) {
+  const h = S.history.find(x => x.video_id === videoId);
+  return `https://www.youtube.com/watch?v=${videoId}${
+    h && h.progress_seconds > 0 && !h.completed ? `&t=${h.progress_seconds}s` : ""}`;
+}
+
+function fmtTime(totalSeconds) {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+    : `${m}:${String(s).padStart(2, "0")}`;
+}
+
+// Single "author · state" meta line, kept to one line (see .media-meta) so
+// a card's height stays tied to the 2-line title clamp alone - optional
+// watch state must never grow or shrink the card.
+function metaLineHTML(videoId, m) {
+  const h = S.history.find(x => x.video_id === videoId);
+  let state = "";
+  if (h?.completed) state = ` · <span class="meta-watched">${ICONS.check} Watched</span>`;
+  else if (h?.progress_seconds > 0) state = ` · Resume at ${fmtTime(h.progress_seconds)}`;
+  return `${esc(m.author)}${state}`;
+}
+
+// Progress shown as a thin bar overlaid on the thumbnail's bottom edge,
+// rather than a row in the text flow - keeps the card's height fixed
+// regardless of watch state, same principle as the meta line above.
+function progOverlayHTML(videoId) {
+  const h = S.history.find(x => x.video_id === videoId);
+  if (!h || (!h.completed && h.progress_seconds === 0)) return "";
+  if (h.completed) return `<div class="thumb-prog"><div class="thumb-prog-fill prog-done" style="width:100%"></div></div>`;
+  const pct = Math.min(99, Math.round(h.progress_seconds / 600 * 100)); // rough estimate
+  return `<div class="thumb-prog"><div class="thumb-prog-fill prog-part" style="width:${pct}%"></div></div>`;
+}
+
+function mediaCard(videoId, m, thumbActionHtml = "") {
+  return `<div class="media-card">
+    <div class="thumb-wrap">
+      <img src="${esc(m.thumb)}" loading="lazy" alt="">
+      ${thumbActionHtml}
+      ${progOverlayHTML(videoId)}
+    </div>
+    <div class="media-info">
+      <a class="media-title" href="${watchLink(videoId)}" target="_blank">${esc(m.title)}</a>
+      <div class="media-meta">${metaLineHTML(videoId, m)}</div>
+    </div>
+  </div>`;
+}
+
+// ── Connect & sync ───────────────────────────────────────────────
+async function connect() {
+  saveToken();
+  const status = document.getElementById("conn-status");
+  status.textContent = "Connecting…"; status.className = "";
+  log("Connecting…");
+  try {
+    const user = await api("/current_user");
+    status.innerHTML = `${ICONS.check} ${esc(user.name)}`; status.className = "ok";
+    S.connected = true;
+    log(`Connected as ${user.name}`, "ok");
+    document.getElementById("pl-body").innerHTML   = `<p class="empty">Loading…</p>`;
+    document.getElementById("hist-body").innerHTML = `<p class="empty">Loading…</p>`;
+    document.getElementById("subs-body").innerHTML = `<p class="empty">Loading…</p>`;
+    await syncAll();
+  } catch (e) {
+    status.textContent = "Failed"; status.className = "err";
+    log(e.message, "err");
+  }
+}
+
+async function syncAll() {
+  if (!S.connected) return;
+  log("Syncing…");
+  _histObs = null;  // reset history observer on each full sync
+
+  // Track per-branch outcomes so one branch's error can't be silently
+  // erased by another branch's success message. Previously every branch
+  // replaced the single status line unconditionally - e.g. a Playlists
+  // error would vanish the instant the Feed request finished, making it
+  // look like everything was fine.
+  const branchErrors = {};
+  let settledCount = 0;
+
+  function reportError(name, msg) {
+    branchErrors[name] = msg;
+    log(Object.entries(branchErrors).map(([n, m]) => `${n}: ${m}`).join("  •  "), "err");
+  }
+  function settle() {
+    settledCount++;
+    if (settledCount === 4 && Object.keys(branchErrors).length === 0) {
+      log("Ready", "ok");
+    }
+  }
+
+  // Fire everything simultaneously — each branch renders as soon as its own
+  // data arrives, completely independent of the other columns.
+  try {
+
+    // ── Subscriptions (channel list) ──────────────────────────────
+    api("/subscriptions").then(subs => {
+      S.subs = subs;
+      renderSubs();
+    }).catch(e => reportError("Subs", e.message)).finally(settle);
+
+    // ── Playlists ─────────────────────────────────────────────────
+    api("/playlists").then(async playlists => {
+      S.playlists = playlists;
+      await Promise.all(playlists.map(async pl => {
+        S.plContents[pl.id] = await api(`/playlists/${pl.id}`);
+      }));
+      // Prefetch oEmbed for playlist videos then render
+      const ids = Object.values(S.plContents).flat().map(i => i.video_id);
+      await prefetchMeta([...new Set(ids)]);
+      renderPlaylists();
+    }).catch(e => reportError("Playlists", e.message)).finally(settle);
+
+    // ── History (streams cards top-to-bottom) ─────────────────────
+    const HIST_PAGE = 250;
+    S.historyOffset = 0;
+    S.historyExhausted = false;
+    api(`/history?limit=${HIST_PAGE + 1}&offset=0`).then(rows => {
+      S.historyExhausted = rows.length <= HIST_PAGE;
+      S.history = rows.slice(0, HIST_PAGE);
+      S.historyOffset = S.history.length;
+      document.getElementById("hist-meta").textContent = `${S.history.length}${S.historyExhausted ? "" : "+"}`;
+      document.getElementById("hist-body").innerHTML = "";
+      streamHistory(S.history, !S.historyExhausted);
+    }).catch(e => reportError("History", e.message)).finally(settle);
+
+    // ── Subscription feed (updates subs column when ready) ────────
+    api("/subscriptions/feed").then(async feed => {
+      S.feed = feed;
+      const ids = feed.flatMap(ch => (ch.videos || []).map(v => v.video_id));
+      await prefetchMeta([...new Set(ids)]);
+      renderSubs();
+    }).catch(e => reportError("Feed", e.message)).finally(settle);
+
+  } catch (e) {
+    log(e.message, "err");
+  }
+}
+
+// ── Playlists column ─────────────────────────────────────────────
+function renderPlaylists() {
+  const body = document.getElementById("pl-body");
+  document.getElementById("pl-meta").textContent = `${S.playlists.length}`;
+  if (!S.playlists.length) {
+    body.innerHTML = `<p class="empty">${S.connected ? "Loading…" : "Connect to load."}</p>`;
+    return;
+  }
+
+  let html = "";
+
+  for (const pl of S.playlists) {
+    const sys = pl.name === SYS_LIKED || pl.name === SYS_LATER;
+    const cnt = (S.plContents[pl.id] || []).length;
+    const sel = S.activePl === pl.id ? " selected" : "";
+    const icon = pl.name === SYS_LIKED ? ICONS.star : pl.name === SYS_LATER ? ICONS.hourglass : ICONS.folder;
+    const del = sys ? "" : `<button class="btn btn-danger" onclick="deletePl(${pl.id})">Del</button>`;
+    html += `<div class="pl-row${sel}" onclick="selectPl(${pl.id})">
+      <span class="pl-name">${icon} ${esc(pl.name)}</span>
+      <span class="pl-count">${cnt}</span>
+      ${del}
+    </div>`;
+  }
+
+  // Active playlist contents, shown below the list
+  if (S.activePl !== null) {
+    const pl = S.playlists.find(p => p.id === S.activePl);
+    const items = S.plContents[S.activePl] || [];
+    html += `<hr class="pl-divider"><div class="pl-section-label">${esc(pl?.name || "")}</div>`;
+    if (!items.length) {
+      html += `<p class="empty">Empty.</p>`;
+    } else {
+      for (const item of items) {
+        const m = metaCache[item.video_id] || { title: item.video_id, author: "", handle: null, thumb: `https://img.youtube.com/vi/${item.video_id}/mqdefault.jpg` };
+        const btn = `<button class="thumb-action" onclick="removePlItem(${S.activePl},'${item.video_id}')" title="Remove">${ICONS.trash}</button>`;
+        html += mediaCard(item.video_id, m, btn);
+      }
+    }
+  }
+
+  body.innerHTML = html || `<p class="empty">No playlists.</p>`;
+}
+
+function selectPl(id) {
+  S.activePl = S.activePl === id ? null : id;
+  // Prefetch contents if not already cached
+  if (S.activePl !== null) {
+    const items = S.plContents[S.activePl] || [];
+    prefetchMeta(items.map(i => i.video_id)).then(() => renderPlaylists());
+  }
+  renderPlaylists();
+}
+
+async function createPl() {
+  const name = document.getElementById("inp-pl-name").value.trim();
+  if (!name || name === SYS_LIKED || name === SYS_LATER) return;
+  try {
+    await api("/playlists", "POST", { name });
+    document.getElementById("inp-pl-name").value = "";
+    await syncAll();
+  } catch (e) { log(e.message, "err"); }
+}
+
+async function deletePl(id) {
+  if (!confirm("Delete this playlist?")) return;
+  try {
+    await api(`/playlists/${id}`, "DELETE");
+    if (S.activePl === id) S.activePl = null;
+    await syncAll();
+  } catch (e) { log(e.message, "err"); }
+}
+
+async function removePlItem(plId, videoId) {
+  try {
+    await api(`/playlists/${plId}/item/${videoId}`, "DELETE");
+    await syncAll();
+  } catch (e) { log(e.message, "err"); }
+}
+
+// ── History column ───────────────────────────────────────────────
+// ── History observer (one instance, reused across load-more calls) ──
+let _histObs = null;
+
+function _getHistObs() {
+  if (_histObs) return _histObs;
+  _histObs = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const card = entry.target;
+      const vid = card.dataset.vid;
+      _histObs.unobserve(card);
+      if (metaCache[vid]?.title && metaCache[vid].title !== "Loading…") continue;
+      getMeta(vid).then(m => {
+        const titleEl = card.querySelector(".media-title");
+        const metaEl = card.querySelector(".media-meta");
+        if (titleEl) { titleEl.textContent = m.title; titleEl.href = watchLink(vid); }
+        if (metaEl) metaEl.innerHTML = metaLineHTML(vid, m);
+      });
+    }
+  }, { rootMargin: "200px" });
+  return _histObs;
+}
+
+async function streamHistory(history, hasMore) {
+  const body = document.getElementById("hist-body");
+  if (!history.length) {
+    body.innerHTML = `<p class="empty">No watch history yet.</p>`;
+    return;
+  }
+
+  // Remove existing "load more" button before appending new cards
+  const existing = body.querySelector(".hist-load-more");
+  if (existing) existing.remove();
+
+  const obs = _getHistObs();
+  history.forEach(h => {
+    const cached = metaCache[h.video_id];
+    const thumb = `https://img.youtube.com/vi/${h.video_id}/mqdefault.jpg`;
+    const m = cached || { title: "Loading…", author: "", thumb };
+    const div = document.createElement("div");
+    div.className = "media-card";
+    div.dataset.vid = h.video_id;
+    div.innerHTML = `
+      <div class="thumb-wrap">
+        <img src="${esc(m.thumb)}" loading="lazy" alt="">
+        ${progOverlayHTML(h.video_id)}
+      </div>
+      <div class="media-info">
+        <a class="media-title" href="${watchLink(h.video_id)}" target="_blank">${esc(m.title)}</a>
+        <div class="media-meta">${metaLineHTML(h.video_id, m)}</div>
+      </div>`;
+    body.appendChild(div);
+    obs.observe(div);  // only observe the new card, never re-scan existing ones
+  });
+
+  if (hasMore) {
+    body.insertAdjacentHTML("beforeend",
+      `<button class="btn btn-ghost hist-load-more" onclick="loadMoreHistory()" style="width:100%;margin-top:8px">Load 250 more…</button>`);
+  }
+}
+
+async function loadMoreHistory() {
+  const btn = document.querySelector(".hist-load-more");
+  if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
+
+  const HIST_PAGE = 250;
+  try {
+    const rows = await api(`/history?limit=${HIST_PAGE + 1}&offset=${S.historyOffset}`);
+    const hasMore = rows.length > HIST_PAGE;
+    const newEntries = rows.slice(0, HIST_PAGE);
+    S.history = S.history.concat(newEntries);
+    S.historyOffset += newEntries.length;
+    S.historyExhausted = !hasMore;
+    document.getElementById("hist-meta").textContent =
+      `${S.historyOffset}${S.historyExhausted ? "" : "+"}`;
+    if (btn) btn.remove();
+    await streamHistory(newEntries, hasMore);
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = "Load 250 more…"; }
+    log("History error: " + e.message, "err");
+  }
+}
+
+// ── Subscriptions column ─────────────────────────────────────────
+function renderSubs() {
+  const body = document.getElementById("subs-body");
+  document.getElementById("subs-meta").textContent = `${S.subs.length}`;
+  if (!S.subs.length) {
+    body.innerHTML = `<p class="empty">${S.connected ? "Loading…" : "Connect to load."}</p>`;
+    return;
+  }
+
+  if (!S.feed.length) {
+    // Feed not loaded yet — show channel list only, alphabetically sorted
+    const sortedSubs = [...S.subs].sort((a, b) => a.channel_id.localeCompare(b.channel_id));
+    body.innerHTML = sortedSubs.map(s => `<div class="pl-row">
+      <span class="pl-name">${esc(s.channel_id)}</span>
+      <button class="btn btn-danger" onclick="unsub('${esc(s.channel_id)}')">Unsub</button>
+    </div>`).join("");
+    return;
+  }
+
+  let html = "";
+  const sortedFeed = [...S.feed].sort((a, b) => a.channel_id.localeCompare(b.channel_id));
+  for (const ch of sortedFeed) {
+    const vids = (ch.videos || []).map(v => {
+      const m = metaCache[v.video_id] || { title: v.video_id, author: ch.channel_id, thumb: `https://img.youtube.com/vi/${v.video_id}/mqdefault.jpg` };
+      return mediaCard(v.video_id, m);
+    }).join("");
+    const emptyMsg = ch.ok === false
+      ? `<p class="empty" style="color:#b45309">⚠ Couldn't check this channel just now (network issue) - will retry automatically.</p>`
+      : `<p class="empty">No recent uploads.</p>`;
+    html += `<div class="ch-block">
+      <div class="ch-head">
+        <span class="ch-name">${esc(ch.channel_id)}</span>
+        <button class="btn btn-danger" onclick="unsub('${esc(ch.channel_id)}')">Unsub</button>
+      </div>
+      ${vids || emptyMsg}
+    </div>`;
+  }
+  body.innerHTML = html;
+}
+
+async function unsub(channelId) {
+  try { await api(`/subscriptions/${encodeURIComponent(channelId)}`, "DELETE"); await syncAll(); }
+  catch (e) { log(e.message, "err"); }
+}
+
+// ── Search bar ───────────────────────────────────────────────────
+const VIDEO_RE  = /(?:v=|youtu\.be\/)([A-Za-z0-9_-]{11})/;
+const HANDLE_RE = /youtube\.com\/@([A-Za-z0-9_.-]+)/;
+
+async function handleSearch() {
+  const q = document.getElementById("inp-search").value.trim();
+  const panel = document.getElementById("search-actions");
+  panel.innerHTML = "";
+  if (!q || !S.connected) return;
+
+  const vm = q.match(VIDEO_RE);
+  const hm = q.match(HANDLE_RE) || (q.startsWith("@") ? [null, q.slice(1)] : null);
+
+  if (vm) {
+    const videoId = vm[1];
+    panel.innerHTML = `<span style="color:var(--muted);font-size:11px">Loading…</span>`;
+    const m = await getMeta(videoId);
+
+    const plLiked = S.playlists.find(p => p.name === SYS_LIKED);
+    const plLater = S.playlists.find(p => p.name === SYS_LATER);
+    const isLiked = plLiked && (S.plContents[plLiked.id] || []).some(i => i.video_id === videoId);
+    const isLater = plLater && (S.plContents[plLater.id] || []).some(i => i.video_id === videoId);
+    const isSubbed = m.handle && S.subs.some(s => s.channel_id.toLowerCase() === m.handle.toLowerCase());
+
+    const btns = [
+      isSubbed
+        ? btn("Unsub", "danger",  () => unsub(m.handle))
+        : btn(`${ICONS.plus} Subscribe`, "teal", () => sub(m.handle || m.author)),
+      plLiked ? (isLiked
+        ? btn("Unlike",    "danger",  () => plToggle(videoId, plLiked.id, true))
+        : btn(`${ICONS.heart} Like`,   "ghost",   () => plToggle(videoId, plLiked.id, false))) : null,
+      plLater ? (isLater
+        ? btn(`Remove ${ICONS.hourglass}`, "danger",  () => plToggle(videoId, plLater.id, true))
+        : btn(`${ICONS.hourglass} Later`,  "ghost",   () => plToggle(videoId, plLater.id, false))) : null,
+      btn(`${ICONS.check} Watched`,  "ghost",   () => markDone(videoId)),
+    ].filter(Boolean);
+
+    panel.innerHTML = `<span style="font-size:11px;color:var(--text);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.title)}</span>`;
+    btns.forEach(b => panel.appendChild(b));
+  } else if (hm) {
+    const handle = "@" + hm[1];
+    const isSubbed = S.subs.some(s => s.channel_id.toLowerCase() === handle.toLowerCase());
+    panel.appendChild(isSubbed
+      ? btn("Unsub", "danger", () => unsub(handle))
+      : btn(`${ICONS.plus} Subscribe`, "teal", () => sub(handle)));
+  }
+}
+
+function btn(label, cls, fn) {
+  const b = document.createElement("button");
+  b.className = `btn btn-${cls}`;
+  b.innerHTML = label;
+  b.addEventListener("click", async () => {
+    b.disabled = true;
+    await fn();
+    b.disabled = false;
+  });
+  return b;
+}
+
+async function sub(channelId) {
+  let id = channelId.trim();
+  if (!id.startsWith("@") && id.includes("/")) id = id.split("/").pop();
+  try { await api("/subscriptions", "POST", { channel_id: id }); await syncAll(); await handleSearch(); }
+  catch (e) { log(e.message, "err"); }
+}
+
+async function plToggle(videoId, plId, remove) {
+  try {
+    await api(remove ? `/playlists/${plId}/item/${videoId}` : `/playlists/${plId}/add`,
+              remove ? "DELETE" : "POST",
+              remove ? null : { video_id: videoId });
+    await syncAll(); await handleSearch();
+  } catch (e) { log(e.message, "err"); }
+}
+
+async function markDone(videoId) {
+  try { await api("/history/update", "POST", { video_id: videoId, progress_seconds: 0, completed: true }); await syncAll(); await handleSearch(); }
+  catch (e) { log(e.message, "err"); }
+}
+
+// ── Auto-refresh ─────────────────────────────────────────────────
+let countdown = REFRESH_S;
+let refreshTimer = null;
+
+function startCountdown() {
+  clearInterval(refreshTimer);
+  countdown = REFRESH_S;
+  document.getElementById("refresh-countdown").textContent = `Auto-refresh in ${countdown}s`;
+  refreshTimer = setInterval(() => {
+    countdown--;
+    document.getElementById("refresh-countdown").textContent = `Auto-refresh in ${countdown}s`;
+    if (countdown <= 0) {
+      syncAll();
+      countdown = REFRESH_S;
+    }
+  }, 1000);
+}
+
+// ── Event wiring ─────────────────────────────────────────────────
+document.getElementById("btn-connect").addEventListener("click", () => { connect(); startCountdown(); });
+document.getElementById("inp-token").addEventListener("keydown", e => { if (e.key === "Enter") { connect(); startCountdown(); } });
+document.getElementById("inp-token").addEventListener("input", saveToken);
+document.getElementById("btn-pl-create").addEventListener("click", createPl);
+document.getElementById("inp-pl-name").addEventListener("keydown", e => { if (e.key === "Enter") createPl(); });
+document.getElementById("inp-search").addEventListener("input", handleSearch);
+document.getElementById("refresh-btn").addEventListener("click", () => { syncAll(); countdown = REFRESH_S; });
+
+loadToken();
+</script>
+</body>
+</html>

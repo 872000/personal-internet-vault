@@ -1,0 +1,460 @@
+/* ===========================================
+   MyTube Sync - bootstrap / page integration
+   =========================================== */
+
+(function () {
+  "use strict";
+
+  function ready(fn) {
+    if (document.body) fn();
+    else document.addEventListener("DOMContentLoaded", fn);
+  }
+
+  let historyTimer = null;
+  let trackedVideoId = null;
+  let trackedVideoEl = null;
+
+  // YouTube serves a responsive www.youtube.com to most mobile browsers
+  // nowadays (m.youtube.com is no longer guaranteed), so hostname alone
+  // isn't reliable. Matches the same breakpoint my CSS uses.
+  function isMobileSite() {
+    if (location.hostname === "m.youtube.com") return true;
+    return window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
+  }
+
+  // ---------- Sidebar collapse to icons-only ----------
+  // YouTube toggles a `guide-state` attribute on <ytd-app> and stores a
+  // preference; clicking the native "guide" (hamburger) button toggles
+  // between full / mini / hidden. The mini ("collapsed") state is the goal.
+  function collapseGuideToMini() {
+    const ytdApp = document.querySelector("ytd-app");
+    if (!ytdApp) return;
+
+    // If the mini-guide isn't being shown, click the masthead guide button
+    // once to collapse the full guide drawer into icon-only mode.
+    const guideDrawer = document.querySelector("tp-yt-app-drawer#guide");
+    const isGuideVisible = guideDrawer && guideDrawer.hasAttribute("opened");
+
+    if (isGuideVisible) {
+      const guideButton = document.querySelector("ytd-masthead #guide-button button, ytd-masthead #guide-button");
+      if (guideButton) guideButton.click();
+    }
+  }
+
+  // ---------- YouTube's own mobile bottom nav offset ----------
+  // YouTube's responsive web layout renders its own fixed bottom nav bar
+  // (Home/Shorts/Subscriptions/You). My bar must stack above it rather
+  // than assuming bottom:0, or the two overlap. The exact element varies
+  // by YouTube's current build, so I try a few known candidates and fall
+  // back to 0 if none are found (my bar then sits at the true bottom).
+  const YT_BOTTOM_NAV_SELECTORS = [
+    "ytm-bottom-bar-layout",          // current YouTube mobile (2024+)
+    "ytm-pivot-bar-renderer",         // older YouTube mobile
+    "tp-yt-app-toolbar.bottom-bar",
+    "#bottom-bar",
+    "ytm-mobile-topbar-renderer + div[role='navigation']"
+  ];
+
+  // `allowFallbackScan` gates the expensive full-DOM branch below - see
+  // waitForYtNavAndSync for why this can't just run on every call.
+  function getYtBottomNavHeight(allowFallbackScan) {
+    for (const sel of YT_BOTTOM_NAV_SELECTORS) {
+      const el = document.querySelector(sel);
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        // Only count it if it's actually pinned to the bottom of the viewport
+        // and visible (avoids matching hidden/offscreen elements).
+        if (rect.height > 0 && rect.bottom >= window.innerHeight - 2) {
+          return Math.round(rect.height);
+        }
+      }
+    }
+
+    if (!allowFallbackScan) return 0;
+
+    // Generic fallback: scan all fixed-position elements anchored to the
+    // bottom and pick the tallest one that spans the full width and sits at
+    // the true bottom. This catches future YouTube DOM changes automatically.
+    // NOTE: this walks + getComputedStyle's every node on the page, so it's
+    // only allowed to run a handful of times (see fallbackTriesLeft below) -
+    // never on every mutation, or it reflow-storms the whole tab.
+    let best = 0;
+    for (const el of document.querySelectorAll("*")) {
+      try {
+        const style = window.getComputedStyle(el);
+        if (style.position !== "fixed") continue;
+        if (style.bottom !== "0px") continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.height > 0 && rect.height < 120 &&
+            rect.width >= window.innerWidth * 0.8 &&
+            rect.bottom >= window.innerHeight - 2) {
+          best = Math.max(best, Math.round(rect.height));
+        }
+      } catch (_) { /* skip shadow-dom elements that throw */ }
+    }
+    return best;
+  }
+
+  function syncYtBottomNavOffset() {
+    const height = getYtBottomNavHeight(true);
+    // Only write the var once there's a real measurement; the CSS default
+    // keeps the bar safe until then.
+    if (height > 0) {
+      document.documentElement.style.setProperty("--mts-yt-bottom-nav-height", `${height}px`);
+    }
+  }
+
+  // Once YouTube's nav bar has been found at least once, keep tracking it
+  // continuously and cheaply (fast named selectors only, never the
+  // expensive full-DOM fallback scan) rather than measuring once and
+  // stopping. YouTube can hide its own nav bar mid-session without a full
+  // navigation - e.g. scrolling a video into the small-player layout - and
+  // without this, my bar would keep reserving space for a nav bar that's
+  // no longer there instead of dropping down to reclaim it.
+  let _navHeightPollInterval = null;
+
+  function _startNavHeightPolling() {
+    if (_navHeightPollInterval) return;
+    _navHeightPollInterval = setInterval(() => {
+      const height = getYtBottomNavHeight(false);
+      document.documentElement.style.setProperty("--mts-yt-bottom-nav-height", `${height}px`);
+    }, 800);
+  }
+
+  // On /watch pages YouTube hides its own bottom nav — my bar should sit at
+  // the true bottom (0). On all other pages I use a safe 56px default while
+  // waiting for the nav to render, then refine with the real measurement.
+  // The extra safe-area-inset padding hedges against devices with a gesture
+  // navigation bar, where 56px alone can undershoot the real inset.
+  function getNavDefault() {
+    return location.pathname.startsWith("/watch")
+      ? "0px"
+      : "calc(56px + env(safe-area-inset-bottom, 0px))";
+  }
+
+  // Single module-level observer/frame handle so that back-to-back
+  // navigations can never stack multiple full-subtree observers on top
+  // of each other.
+  let _navHeightObs = null;
+  let _navHeightRaf = null;
+
+  // Poll until YouTube's nav bar exists, then measure and stop polling.
+  // Uses MutationObserver so it fires the instant the element appears,
+  // even on slow devices where YouTube's SPA takes >5s to render the nav.
+  //
+  // YouTube's SPA mutates the DOM constantly (view counts, chat, lazy
+  // thumbnails, etc.), so a naive "run the full check on every mutation"
+  // observer would fire hundreds of times a second — combined with the
+  // full-DOM fallback scan in getYtBottomNavHeight, that's enough
+  // getComputedStyle traffic to stall the tab. Mutations are coalesced
+  // into at most one check per animation frame, and the expensive
+  // fallback scan is capped to a handful of attempts total rather than
+  // running on every check.
+  function waitForYtNavAndSync() {
+    // Set a safe page-type default immediately
+    document.documentElement.style.setProperty("--mts-yt-bottom-nav-height", getNavDefault());
+
+    const height = getYtBottomNavHeight(true);
+    if (height > 0) {
+      document.documentElement.style.setProperty("--mts-yt-bottom-nav-height", `${height}px`);
+      _startNavHeightPolling();
+      return;
+    }
+
+    // Tear down any watcher left over from a previous navigation.
+    if (_navHeightObs) { _navHeightObs.disconnect(); _navHeightObs = null; }
+    if (_navHeightRaf) { cancelAnimationFrame(_navHeightRaf); _navHeightRaf = null; }
+
+    let fallbackTriesLeft = 6;
+    let checkPending = false;
+
+    const runCheck = () => {
+      checkPending = false;
+      const useFallback = fallbackTriesLeft > 0;
+      if (useFallback) fallbackTriesLeft--;
+      const h = getYtBottomNavHeight(useFallback);
+      if (h > 0) {
+        document.documentElement.style.setProperty("--mts-yt-bottom-nav-height", `${h}px`);
+        obs.disconnect();
+        if (_navHeightObs === obs) _navHeightObs = null;
+        _startNavHeightPolling();
+      }
+    };
+
+    // Watch the DOM for the nav element to appear
+    const obs = new MutationObserver(() => {
+      if (checkPending) return; // already have a check scheduled for this frame
+      checkPending = true;
+      _navHeightRaf = requestAnimationFrame(runCheck);
+    });
+    _navHeightObs = obs;
+    obs.observe(document.body, { childList: true, subtree: true });
+
+    // Safety: disconnect after 30s regardless
+    setTimeout(() => {
+      if (_navHeightObs === obs) { obs.disconnect(); _navHeightObs = null; }
+    }, 30000);
+  }
+
+  // ---------- Shorts handling ----------
+  // /shorts/ is a full-bleed vertical video; my floating mobile bars would
+  // cover part of it, so I hide them entirely while on a Shorts page.
+  function updateShortsState() {
+    const isShorts = location.pathname.startsWith("/shorts/");
+    document.documentElement.setAttribute("mts-shorts", isShorts ? "1" : "0");
+    if (isShorts) {
+      window.__mts.closeMobilePopup();
+    }
+  }
+
+  // ---------- Fullscreen handling ----------
+  function updateFullscreenState() {
+    const fs = window.__mts.isFullscreenActive();
+    document.documentElement.setAttribute("mts-fullscreen", fs ? "1" : "0");
+  }
+
+  // ---------- SPA navigation handling ----------
+  let lastHref = location.href;
+
+  function onNavigate() {
+    if (location.href === lastHref) return;
+    lastHref = location.href;
+
+    detachVideoTracking();
+    window.__mts.renderCurrentCard();
+    // Re-render again shortly after: on /channel/UCxxxx pages YouTube sets
+    // the canonical @handle link asynchronously after navigation.
+    setTimeout(() => window.__mts.renderCurrentCard(), 1000);
+
+    syncYtBottomNavOffset();
+    setTimeout(waitForYtNavAndSync, 300);
+
+    updateShortsState();
+
+    if (!isMobileSite()) collapseGuideToMini();
+
+    // Re-attach to the player after navigation (player element may be re-used or re-created)
+    setTimeout(attachVideoTracking, 800);
+  }
+
+  // YouTube fires this custom event on SPA navigations
+  window.addEventListener("yt-navigate-finish", onNavigate);
+
+  // Fallback observer for mobile builds that don't fire yt-navigate-finish.
+  // Watch only the <title> element — it changes on every navigation but not
+  // on every DOM mutation, avoiding the runaway loop caused by watching body.
+  const titleEl = document.querySelector("title");
+  if (titleEl) {
+    const navObserver = new MutationObserver(() => onNavigate());
+    navObserver.observe(titleEl, { childList: true, characterData: true });
+  }
+
+  // ---------- Video playback tracking ----------
+  function findVideoElement() {
+    return document.querySelector("video.html5-main-video, video");
+  }
+
+  function attachVideoTracking() {
+    const videoId = window.__mts.getCurrentVideoId();
+    if (!videoId) return;
+
+    const videoEl = findVideoElement();
+    if (!videoEl) {
+      // Player might not be ready yet - retry shortly
+      setTimeout(attachVideoTracking, 1000);
+      return;
+    }
+
+    if (trackedVideoEl === videoEl && trackedVideoId === videoId) return;
+
+    detachVideoTracking();
+
+    trackedVideoId = videoId;
+    trackedVideoEl = videoEl;
+
+    // Immediate update on (re)attach
+    sendHistoryUpdate();
+
+    historyTimer = setInterval(sendHistoryUpdate, window.__mts.HISTORY_INTERVAL_MS);
+
+    videoEl.addEventListener("pause", sendHistoryUpdate);
+    videoEl.addEventListener("ended", sendCompletedUpdate);
+    videoEl.addEventListener("seeked", sendHistoryUpdate);
+  }
+
+  function detachVideoTracking() {
+    if (historyTimer) {
+      clearInterval(historyTimer);
+      historyTimer = null;
+    }
+    if (trackedVideoEl) {
+      trackedVideoEl.removeEventListener("pause", sendHistoryUpdate);
+      trackedVideoEl.removeEventListener("ended", sendCompletedUpdate);
+      trackedVideoEl.removeEventListener("seeked", sendHistoryUpdate);
+    }
+    // Send a final update for the video being left
+    if (trackedVideoId && trackedVideoEl) {
+      sendHistoryUpdate();
+    }
+    trackedVideoId = null;
+    trackedVideoEl = null;
+  }
+
+  function sendHistoryUpdate() {
+    if (!trackedVideoEl || !trackedVideoId) return;
+    if (!window.__mts.appState.backendUrl || !window.__mts.appState.apiToken) return;
+
+    const progress = Math.floor(trackedVideoEl.currentTime || 0);
+    const duration = trackedVideoEl.duration || 0;
+    const watchedFraction = duration > 0 ? progress / duration : 0;
+
+    // Shorts are routinely scrolled past in a couple of seconds as part of
+    // normal browsing - recording every brief glance would flood history
+    // with things never really "watched". Regular videos are a deliberate
+    // open, so even a short watch is worth keeping as resume progress -
+    // this guard is Shorts-only.
+    if (duration > 0 && watchedFraction < 0.10 && location.pathname.startsWith("/shorts/")) {
+      return;
+    }
+
+    // A few seconds of credits/outro left shouldn't keep a video sitting
+    // at "in progress" forever - close enough to the end counts as done.
+    const completed = duration > 0 && watchedFraction >= 0.90;
+
+    window.__mts.updateHistoryState(trackedVideoId, progress, completed);
+  }
+
+  function sendCompletedUpdate() {
+    if (!trackedVideoEl || !trackedVideoId) return;
+    const progress = Math.floor(trackedVideoEl.currentTime || 0);
+    window.__mts.updateHistoryState(trackedVideoId, progress, true);
+
+    // Once a video has genuinely ended, nothing further from this element
+    // is worth polling: YouTube resets/reuses it shortly after (replay
+    // overlay, autoplay hand-off), and "ended" is often followed by its own
+    // "pause" event on the same element. Left attached, that pause would
+    // fire sendHistoryUpdate(), read the now-reset currentTime as 0, and
+    // silently overwrite the completed:true just saved above with
+    // progress:0/completed:false - which is the exact symptom reported
+    // (checkmark visible right after finishing, gone shortly after).
+    if (historyTimer) {
+      clearInterval(historyTimer);
+      historyTimer = null;
+    }
+    if (trackedVideoEl) {
+      trackedVideoEl.removeEventListener("pause", sendHistoryUpdate);
+      trackedVideoEl.removeEventListener("ended", sendCompletedUpdate);
+      trackedVideoEl.removeEventListener("seeked", sendHistoryUpdate);
+    }
+    trackedVideoId = null;
+    trackedVideoEl = null;
+  }
+
+  // ---------- Visibility: flush progress on hide, resync on return ----------
+  let _lastSyncAttemptAt = 0;
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      sendHistoryUpdate();
+      return;
+    }
+    // Mobile browsers throttle (or fully pause) background-tab network
+    // activity, so a sync that was still in flight when the tab got
+    // backgrounded can stall indefinitely instead of completing - nothing
+    // previously re-triggered it on return, leaving stale/incomplete data
+    // until the user noticed and manually hit reload. Debounced to avoid
+    // re-syncing on every brief glance away and back.
+    const now = Date.now();
+    if (now - _lastSyncAttemptAt > 15000) {
+      _lastSyncAttemptAt = now;
+      window.__mts.syncAllState();
+    }
+  });
+  window.addEventListener("beforeunload", () => {
+    sendHistoryUpdate();
+  });
+
+  // ---------- Storage change listener (popup updates) ----------
+  browser.storage.onChanged.addListener(async (changes, area) => {
+    if (area !== "local") return;
+    // userName intentionally excluded here: it's only ever written by
+    // popup.js at Connect time, together with backendUrl/apiToken, which
+    // already trigger this branch. The content script itself never writes
+    // userName, so it doesn't need to react to it changing.
+    if (changes.backendUrl || changes.apiToken) {
+      await window.__mts.loadSettings();
+      window.__mts.updateSyncIndicators();
+      await window.__mts.syncAllState();
+    }
+    // Language changed from popup — rebuild UI with new strings
+    if (changes.lang) {
+      await window.__mts.initI18n();
+      // Rebuild nav tab labels (icon span is untouched; only the label text updates)
+      document.querySelectorAll(".mts-tab, .mts-mobile-tab").forEach(el => {
+        const tabId = el.dataset.tab;
+        if (!tabId || tabId === "user") return;
+        const labelMap = { subs: "tabSubscriptions", playlists: "tabPlaylists", history: "tabHistory" };
+        const key = labelMap[tabId];
+        const labelEl = el.querySelector(".mts-tab-label");
+        if (key && labelEl) labelEl.textContent = window.__mts.t(key);
+      });
+      // Re-apply active class to force a layout repaint on all tabs
+      document.querySelectorAll("#mts-tabs .mts-tab").forEach(t => {
+        t.classList.toggle("mts-tab-active", t.dataset.tab === window.__mts.getActiveTabId());
+      });
+      window.__mts.updateSyncIndicators();
+      window.__mts.renderActiveTab();
+      window.__mts.renderCurrentCard();
+    }
+  });
+
+  // ---------- Init ----------
+  ready(async () => {
+    // i18n must resolve before any UI is built so all labels render in
+    // the correct language from the first paint.
+    await window.__mts.initI18n();
+
+    await window.__mts.loadSettings();
+
+    // Build both layouts; CSS media queries decide which is visible.
+    // This avoids guessing "mobile vs desktop" once at load time, which
+    // breaks for resizable windows and for mobile browsers serving the
+    // responsive www.youtube.com instead of m.youtube.com.
+    window.__mts.buildSidebar();
+    window.__mts.buildMobileBar();
+
+    document.documentElement.setAttribute("mts-active", "1");
+
+    document.addEventListener("fullscreenchange", updateFullscreenState);
+    document.addEventListener("webkitfullscreenchange", updateFullscreenState);
+    updateFullscreenState();
+
+    if (!isMobileSite()) {
+      // Wait for YouTube's app shell to be ready before collapsing the guide
+      setTimeout(collapseGuideToMini, 1500);
+    }
+
+    window.__mts.updateSyncIndicators();
+    _lastSyncAttemptAt = Date.now();
+    await window.__mts.syncAllState();
+
+    // Set nav offset: waitForYtNavAndSync sets the page-type default immediately,
+    // then polls until the real nav height is measurable. On resize the nav
+    // already exists so the simpler syncYtBottomNavOffset is fine.
+    waitForYtNavAndSync();
+    window.addEventListener("resize", syncYtBottomNavOffset);
+
+    updateShortsState();
+
+    setTimeout(attachVideoTracking, 1000);
+
+    // Periodic background resync (every 5 minutes) to pick up feed updates.
+    // Skipped while the tab is hidden - no point re-fetching playlists/
+    // history/RSS feeds for a tab nobody is looking at.
+    setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      _lastSyncAttemptAt = Date.now();
+      window.__mts.syncAllState();
+    }, 5 * 60 * 1000);
+  });
+})();

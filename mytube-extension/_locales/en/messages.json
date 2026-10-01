@@ -1,0 +1,41 @@
+{
+  "extensionName": { "message": "MyTube Sync" },
+  "extensionDescription": { "message": "Self-hosted sync for subscriptions, playlists and watch history on YouTube." },
+
+  "tabSubscriptions": { "message": "Subscriptions" },
+  "tabPlaylists": { "message": "Playlists" },
+  "tabHistory": { "message": "History" },
+
+  "notConnected": { "message": "Not connected" },
+  "notConnectedMsg": { "message": "Not connected. Set up via the extension popup." },
+  "loading": { "message": "Loading…" },
+  "loadMore": { "message": "Load 250 more…" },
+  "reloadTitle": { "message": "Reload subscriptions, playlists & history" },
+
+  "noSubscriptions": { "message": "No subscriptions yet." },
+  "noRecentUploads": { "message": "No recent uploads found." },
+  "someChannelsFailed": { "message": "$COUNT$ channel(s) couldn't be checked just now (network issue) - will retry automatically.", "placeholders": { "count": { "content": "$1" } } },
+  "noPlaylists": { "message": "No playlists yet." },
+  "noHistory": { "message": "No watch history yet." },
+  "emptyPlaylist": { "message": "Empty." },
+
+  "btnLike": { "message": "Like" },
+  "btnLiked": { "message": "Liked" },
+  "btnWatchLater": { "message": "Watch Later" },
+  "btnInWatchLater": { "message": "In Watch Later" },
+  "btnSubscribe": { "message": "Subscribe" },
+  "btnSubscribed": { "message": "Subscribed" },
+  "btnAddToPlaylist": { "message": "Add to playlist..." },
+  "btnNewPlaylist": { "message": "Create" },
+  "newPlaylistPlaceholder": { "message": "New playlist name" },
+  "btnDeletePlaylist": { "message": "Delete playlist" },
+  "confirmDeletePlaylist": { "message": "Delete playlist \"$NAME$\"?", "placeholders": { "name": { "content": "$1" } } },
+
+  "watched": { "message": "Watched" },
+  "resumeAt": { "message": "$TIME$", "placeholders": { "time": { "content": "$1" } } },
+
+  "cantSubscribeNoHandle": { "message": "Can't subscribe: no @handle found for this channel." },
+
+  "playlistLiked": { "message": "Liked Videos" },
+  "playlistWatchLater": { "message": "Watch Later" }
+}
