@@ -188,7 +188,7 @@ def spotify_saved_json(path: str) -> list[SavedItem]:
         track_id = uri.split(":")[-1] if ":" in uri else ""
         url = f"https://open.spotify.com/track/{track_id}" if track_id else ""
         title = " — ".join(x for x in
-                           (t.get("track"), t.get("artist")) if x) or [url]
+                           (t.get("track"), t.get("artist")) if x) or url
         items.append(SavedItem(
             service="spotify",
             kind="track",
